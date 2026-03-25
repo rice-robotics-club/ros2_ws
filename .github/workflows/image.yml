@@ -44,8 +44,39 @@ jobs:
           base_image:  https://cdimage.ubuntu.com/releases/${{inputs.ubuntu_image}}/release/ubuntu-${{inputs.ubuntu_image}}-preinstalled-server-arm64+raspi.img.xz
           image_additional_mb: 2048
           commands: |
-            cp ./id_ed25519 /home/${{env.NAME}}/.ssh/id_ed25519
-            cp ./id_ed25519.pub /home/${{env.NAME}}/.ssh/id_ed25519.pub
+            # Setup User
+            groupadd -f i2c
+            useradd -m -s /bin/bash ${{ env.NAME }}
+            usermod -aG sudo,i2c,dialout,video ${{ env.NAME }}
+            userdel -r ubuntu
+
+            # Update Cloud-Init
+            sed -i "s/name: ubuntu/name: ${{ env.NAME }}/g" /etc/cloud/cloud.cfg
+            
+            # Upgrade packages
+            apt update
+            apt upgrade
+
+            # Install ROS2 Deb
+            apt install curl -y
+            export ROS_APT_SOURCE_VERSION=$(curl -s https://api.github.com/repos/ros-infrastructure/ros-apt-source/releases/latest | grep -F "tag_name" | awk -F'"' '{print $4}')
+            curl -L -o /tmp/ros2-apt-source.deb "https://github.com/ros-infrastructure/ros-apt-source/releases/download/${ROS_APT_SOURCE_VERSION}/ros2-apt-source_${ROS_APT_SOURCE_VERSION}.$(. /etc/os-release && echo ${UBUNTU_CODENAME:-${VERSION_CODENAME}})_all.deb"
+            dpkg -i /tmp/ros2-apt-source.deb
+
+            # Install ROS2
+            apt update
+            apt upgrade
+            apt install ros-$ROS_DISTRO-desktop python3-colcon python3-colcon-mixin git -y
+
+            # Copy SSH Key
+            mkdir -p /home/${{ env.NAME }}/.ssh
+            cp ./id_ed25519 /home/${{ env.NAME }}/.ssh/id_ed25519
+            cp ./id_ed25519.pub /home/${{ env.NAME }}/.ssh/id_ed25519.pub
+            chmod 700 /home/${{ env.NAME }}/.ssh
+            chown -R ${{ env.NAME }}:${{ env.NAME }} /home/${{ env.NAME }}/.ssh
+
+            # Clone Repo
+            git clone --recurse-submodules git@github.com:${{ github.repository }}.git /home/${{ env.NAME }}/${{ github.event.repository.name }}
       - name: Create Release
         id: create_release
         uses: actions/create-release@v1
