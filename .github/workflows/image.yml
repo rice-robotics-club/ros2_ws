@@ -45,24 +45,28 @@ jobs:
         with:
           base_image: https://cdimage.ubuntu.com/releases/${{inputs.ubuntu_image}}/release/ubuntu-${{inputs.ubuntu_image}}-preinstalled-server-arm64+raspi.img.xz
           image_additional_mb: 2048
+          bootpartition: ''
           shell: /bin/bash
           commands: |
             # Prevent interactive prompts during apt
             export DEBIAN_FRONTEND=noninteractive
 
+            ROOT_PART=$(df -P / | awk 'NR==2 {print $1}')
+            BOOT_PART="${ROOT_PART%p2}p1"
+            
+            mkdir -p /boot/firmware
+            mount ${BOOT_PART} /boot/firmware
+
             echo 'APT::Sandbox::User "root";' > /etc/apt/apt.conf.d/99-disable-sandbox
             
             if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
-                # Ubuntu 24.04 DEB822 format: Force all components on all suites
                 sed -i 's/Components:.*/Components: main restricted universe multiverse/g' /etc/apt/sources.list.d/ubuntu.sources
             fi
             if [ -f /etc/apt/sources.list ]; then
-                # Ubuntu 22.04 Legacy format
                 sed -i 's/ main restricted$/ main restricted universe multiverse/g' /etc/apt/sources.list
                 sed -i 's/ main$/ main restricted universe multiverse/g' /etc/apt/sources.list
             fi
 
-            apt-get clean
             apt-get update
             apt-get full-upgrade -y -q
             apt-get install -f -y
