@@ -1,0 +1,73 @@
+name: Create Ubuntu Image
+
+permissions: write-all
+
+on:
+  workflow_dispatch:
+    inputs:
+      ubuntu_image:
+        description: 'Ubuntu Image'
+        type: choice
+        required: true
+        default: '24.04.4'
+        options:
+          - 24.04.4
+          - 22.04.5
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      PUBLIC_KEY: ''
+      NAME: ''
+    steps:
+      - name: Setup Environment
+        run: |
+          echo "NAME=$(echo "${{ github.event.repository.name }}" | rev | cut -d'_' -f2- | rev)" >> "$GITHUB_ENV"
+          ssh-keygen -t ed25519 -f ./id_ed25519 -N ''
+          echo "PUBLIC_KEY=$(cat ./id_ed25519.pub)" >> "$GITHUB_ENV"
+      - name: Create Deploy Key
+        uses: octokit/request-action@v2.x
+        id: add_deploy_key
+        with:
+          route: POST /repos/${{ github.repository }}/keys
+          owner: ${{ github.repository_owner }}
+          repo: ${{ github.event.repository.name }}
+          title: ${{ env.NAME }}
+          key: ${{ env.PUBLIC_KEY }}
+          read_only: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.ADMIN_PAT }}
+      - name: Customize Image
+        uses: pguyot/arm-runner-action@v2
+        id: customize_image
+        with:
+          base_image:  https://cdimage.ubuntu.com/releases/${{inputs.ubuntu_image}}/release/ubuntu-${{inputs.ubuntu_image}}-preinstalled-server-arm64+raspi.img.xz
+          image_additional_mb: 2048
+          commands: |
+            cp ./id_ed25519.pub /home/${{env.NAME}}/.ssh/id_ed25519.pub
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{inputs.ubuntu_image}}
+          release_name: Ubuntu ${{inputs.ubuntu_image}} Image
+          draft: true
+          prerelease: false
+      - name: Upload Image
+        uses: actions/upload-release-asset@v1.0.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ${{ steps.customize_image.outputs.image }}
+          asset_name: ubuntu.img
+          asset_content_type: application/x-ima
+      - name: Publish Image
+        uses: eregon/publish-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          release_id: ${{ steps.create_release.outputs.id }}
+      
