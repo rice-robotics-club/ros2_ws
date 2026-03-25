@@ -45,6 +45,7 @@ jobs:
         with:
           base_image: https://cdimage.ubuntu.com/releases/${{inputs.ubuntu_image}}/release/ubuntu-${{inputs.ubuntu_image}}-preinstalled-server-arm64+raspi.img.xz
           image_additional_mb: 2048
+          shell: /bin/bash
           commands: |
             # Prevent interactive prompts during apt
             export DEBIAN_FRONTEND=noninteractive
