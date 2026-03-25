@@ -25,6 +25,7 @@ jobs:
           echo "NAME=$(echo "${{ github.event.repository.name }}" | rev | cut -d'_' -f2- | rev)" >> "$GITHUB_ENV"
           ssh-keygen -t ed25519 -f ./id_ed25519 -N ''
           echo "PUBLIC_KEY=$(cat ./id_ed25519.pub)" >> "$GITHUB_ENV"
+
       - name: Create Deploy Key
         uses: octokit/request-action@v2.x
         id: add_deploy_key
@@ -37,69 +38,77 @@ jobs:
           read_only: false
         env:
           GITHUB_TOKEN: ${{ secrets.ADMIN_PAT }}
+
       - name: Customize Image
         uses: pguyot/arm-runner-action@v2
-        id: customize_image
         with:
-          base_image:  https://cdimage.ubuntu.com/releases/${{inputs.ubuntu_image}}/release/ubuntu-${{inputs.ubuntu_image}}-preinstalled-server-arm64+raspi.img.xz
+          base_image: https://cdimage.ubuntu.com/releases/${{inputs.ubuntu_image}}/release/ubuntu-${{inputs.ubuntu_image}}-preinstalled-server-arm64+raspi.img.xz
           image_additional_mb: 2048
           commands: |
+            # Prevent interactive prompts during apt
+            export DEBIAN_FRONTEND=noninteractive
+
             # Setup User
             groupadd -f i2c
             useradd -m -s /bin/bash ${{ env.NAME }}
             usermod -aG sudo,i2c,dialout,video ${{ env.NAME }}
+            echo "${{ env.NAME }}:${{ env.NAME }}" | chpasswd
+            
             userdel -r ubuntu
 
             # Update Cloud-Init
             sed -i "s/name: ubuntu/name: ${{ env.NAME }}/g" /etc/cloud/cloud.cfg
+            chage -I -1 -m 0 -M 99999 -E -1 ${{ env.NAME }}
             
-            # Upgrade packages
-            apt update
-            apt upgrade
+            # Upgrade packages safely
+            apt-get update
+            apt-get upgrade -y -q
 
             # Install ROS2 Deb
-            apt install curl -y
+            apt-get install curl -y
             export ROS_APT_SOURCE_VERSION=$(curl -s https://api.github.com/repos/ros-infrastructure/ros-apt-source/releases/latest | grep -F "tag_name" | awk -F'"' '{print $4}')
             curl -L -o /tmp/ros2-apt-source.deb "https://github.com/ros-infrastructure/ros-apt-source/releases/download/${ROS_APT_SOURCE_VERSION}/ros2-apt-source_${ROS_APT_SOURCE_VERSION}.$(. /etc/os-release && echo ${UBUNTU_CODENAME:-${VERSION_CODENAME}})_all.deb"
             dpkg -i /tmp/ros2-apt-source.deb
 
+            # Determine ROS Distro based on Ubuntu version
+            if [[ "${{ inputs.ubuntu_image }}" == "24.04"* ]]; then
+              ROS_DISTRO="jazzy"
+            elif [[ "${{ inputs.ubuntu_image }}" == "22.04"* ]]; then
+              ROS_DISTRO="humble"
+            else
+              ROS_DISTRO="humble" # Fallback
+            fi
+
             # Install ROS2
-            apt update
-            apt upgrade
-            apt install ros-$ROS_DISTRO-desktop python3-colcon python3-colcon-mixin git -y
+            apt-get update
+            apt-get install ros-$ROS_DISTRO-desktop python3-colcon-common-extensions python3-colcon-mixin git -y
 
             # Copy SSH Key
-            mkdir -p /home/${{ env.NAME }}/.ssh
-            cp ./id_ed25519 /home/${{ env.NAME }}/.ssh/id_ed25519
-            cp ./id_ed25519.pub /home/${{ env.NAME }}/.ssh/id_ed25519.pub
-            chmod 700 /home/${{ env.NAME }}/.ssh
-            chown -R ${{ env.NAME }}:${{ env.NAME }} /home/${{ env.NAME }}/.ssh
+            SSH_DIR="/home/${{ env.NAME }}/.ssh"
+            mkdir -p $SSH_DIR
+            cp ./id_ed25519 $SSH_DIR/id_ed25519
+            cp ./id_ed25519.pub $SSH_DIR/id_ed25519.pub
+            
+            # Trust GitHub host key to prevent git clone hanging
+            ssh-keyscan github.com >> $SSH_DIR/known_hosts
 
-            # Clone Repo
-            git clone --recurse-submodules git@github.com:${{ github.repository }}.git /home/${{ env.NAME }}/${{ github.event.repository.name }}
-      - name: Create Release
-        id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            # Fix permissions before clone
+            chmod 700 $SSH_DIR
+            chmod 600 $SSH_DIR/id_ed25519
+            chmod 644 $SSH_DIR/id_ed25519.pub $SSH_DIR/known_hosts
+            chown -R ${{ env.NAME }}:${{ env.NAME }} $SSH_DIR
+
+            # Clone Repo as the target user (prevents root ownership)
+            su - ${{ env.NAME }} -c "git clone --recurse-submodules git@github.com:${{ github.repository }}.git /home/${{ env.NAME }}/${{ github.event.repository.name }}"
+
+      - name: Rename Image
+        run: mv ubuntu-${{inputs.ubuntu_image}}-preinstalled-server-arm64+raspi.img ubuntu.img
+
+      - name: Create Release and Upload Asset
+        uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{inputs.ubuntu_image}}
-          release_name: Ubuntu ${{inputs.ubuntu_image}} Image
-          draft: true
+          tag_name: v${{inputs.ubuntu_image}}-${{ github.run_number }}
+          name: Ubuntu ${{inputs.ubuntu_image}} Image
+          draft: false
           prerelease: false
-      - name: Upload Image
-        uses: actions/upload-release-asset@v1.0.1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ${{ steps.customize_image.outputs.image }}
-          asset_name: ubuntu.img
-          asset_content_type: application/x-ima
-      - name: Publish Image
-        uses: eregon/publish-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          release_id: ${{ steps.create_release.outputs.id }}
-      
+          files: ubuntu.img
