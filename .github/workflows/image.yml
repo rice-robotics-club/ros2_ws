@@ -1,4 +1,5 @@
 name: Create Ubuntu Image
+description: Creates an Ubuntu image for Raspberry Pi preloaded with ROS2, Wifi, SSH, and this repository.
 
 permissions: write-all
 
