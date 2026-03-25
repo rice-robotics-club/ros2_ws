@@ -80,8 +80,15 @@ jobs:
                       password: "${{ secrets.WIFI_PASSWORD }}"
             EOF
             chmod 600 /etc/netplan/60-wifi.yaml
+
+            
             
             # Upgrade packages safely
+            apt-get update
+            apt-get install -y software-properties-common
+            add-apt-repository universe -y
+            add-apt-repository restricted -y
+            add-apt-repository multiverse -y
             apt-get update
             apt-get upgrade -y -q
 
