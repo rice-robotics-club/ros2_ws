@@ -53,11 +53,14 @@ jobs:
             useradd -m -s /bin/bash ${{ env.NAME }}
             usermod -aG sudo,i2c,dialout,video ${{ env.NAME }}
             echo "${{ env.NAME }}:${{ env.NAME }}" | chpasswd
-            
-            userdel -r ubuntu
+
+            # Set Hostname
+            echo "${{ env.NAME }}" > /etc/hostname
+            sed -i "s/127.0.1.1.*/127.0.1.1 ${{ env.NAME }}/g" /etc/hosts
 
             # Update Cloud-Init
             sed -i "s/name: ubuntu/name: ${{ env.NAME }}/g" /etc/cloud/cloud.cfg
+            sed -i 's/preserve_hostname: false/preserve_hostname: true/g' /etc/cloud/cloud.cfg
             chage -I -1 -m 0 -M 99999 -E -1 ${{ env.NAME }}
             
             # Upgrade packages safely
