@@ -63,6 +63,22 @@ jobs:
             sed -i "s/name: ubuntu/name: ${{ env.NAME }}/g" /etc/cloud/cloud.cfg
             sed -i 's/preserve_hostname: false/preserve_hostname: true/g' /etc/cloud/cloud.cfg
             chage -I -1 -m 0 -M 99999 -E -1 ${{ env.NAME }}
+
+            # Set Wifi Network
+            mkdir -p /etc/netplan
+            cat <<EOF > /etc/netplan/60-wifi.yaml
+            network:
+              version: 2
+              renderer: networkd
+              wifis:
+                wlan0:
+                  dhcp4: true
+                  optional: true
+                  access-points:
+                    "${{ vars.WIFI_SSID }}":
+                      password: "${{ secrets.WIFI_PASSWORD }}"
+            EOF
+            chmod 600 /etc/netplan/60-wifi.yaml
             
             # Upgrade packages safely
             apt-get update
