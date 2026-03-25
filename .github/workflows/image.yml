@@ -50,6 +50,23 @@ jobs:
             # Prevent interactive prompts during apt
             export DEBIAN_FRONTEND=noninteractive
 
+            echo 'APT::Sandbox::User "root";' > /etc/apt/apt.conf.d/99-disable-sandbox
+            
+            if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
+                # Ubuntu 24.04 DEB822 format: Force all components on all suites
+                sed -i 's/Components:.*/Components: main restricted universe multiverse/g' /etc/apt/sources.list.d/ubuntu.sources
+            fi
+            if [ -f /etc/apt/sources.list ]; then
+                # Ubuntu 22.04 Legacy format
+                sed -i 's/ main restricted$/ main restricted universe multiverse/g' /etc/apt/sources.list
+                sed -i 's/ main$/ main restricted universe multiverse/g' /etc/apt/sources.list
+            fi
+
+            apt-get clean
+            apt-get update
+            apt-get full-upgrade -y -q
+            apt-get install -f -y
+
             # Setup User
             groupadd -f i2c
             useradd -m -s /bin/bash ${{ env.NAME }}
@@ -81,18 +98,8 @@ jobs:
             EOF
             chmod 600 /etc/netplan/60-wifi.yaml
 
-            
-            
-            # Upgrade packages safely
-            apt-get update
-            apt-get install -y software-properties-common
-            add-apt-repository universe -y
-            add-apt-repository restricted -y
-            add-apt-repository multiverse -y
-            apt-get update
-            apt-get upgrade -y -q
-
             # Install ROS2 Deb
+            apt-get update
             apt-get install curl -y
             export ROS_APT_SOURCE_VERSION=$(curl -s https://api.github.com/repos/ros-infrastructure/ros-apt-source/releases/latest | grep -F "tag_name" | awk -F'"' '{print $4}')
             curl -L -o /tmp/ros2-apt-source.deb "https://github.com/ros-infrastructure/ros-apt-source/releases/download/${ROS_APT_SOURCE_VERSION}/ros2-apt-source_${ROS_APT_SOURCE_VERSION}.$(. /etc/os-release && echo ${UBUNTU_CODENAME:-${VERSION_CODENAME}})_all.deb"
@@ -109,6 +116,7 @@ jobs:
 
             # Install ROS2
             apt-get update
+            apt-get upgrade -y -q
             apt-get install ros-$ROS_DISTRO-desktop python3-colcon-common-extensions python3-colcon-mixin git -y
 
             # Copy SSH Key
